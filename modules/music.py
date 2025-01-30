@@ -1,6 +1,7 @@
 from langchain_groq import ChatGroq
 from langchain.schema import SystemMessage, HumanMessage
-import yt_dlp, os
+import yt_dlp
+import os
 import vlc
 from logger import CustomLogger  # Import CustomLogger
 from prompts.music_prompt import music_few_shot_examples, music_prompt_template
@@ -25,7 +26,8 @@ class MusicModule:
         # Few-shot examples for music queries
         self.music_few_shot_examples = music_few_shot_examples
 
-        # Initialize VLC player (global state for playing music)
+        # Initialize VLC instance and player
+        self.vlc_instance = vlc.Instance()
         self.music_player = None
 
         # Initialize logger
@@ -59,6 +61,8 @@ class MusicModule:
     def fetch_and_play_music(self, query):
         """
         Searches for music on YouTube and streams it directly using VLC.
+        :param query: Refined music query.
+        :return: Response message.
         """
         self.logger.info(f"Fetching and attempting to play music for query: {query}")
         try:
@@ -84,23 +88,21 @@ class MusicModule:
                 # Stop any currently playing music
                 self.stop_music()
 
-                # Add headers for VLC to handle YouTube URLs
-                media = vlc.Media(video_url)
+                # Prepare VLC media player
+                self.music_player = self.vlc_instance.media_player_new()
+                media = self.vlc_instance.media_new(video_url)
                 media.add_options(
                     ":http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
                     ":http-referrer=https://www.youtube.com/",
                     ":network-caching=1000"
                 )
-
-                # Play the stream
-                self.music_player = vlc.MediaPlayer()
                 self.music_player.set_media(media)
                 self.music_player.audio_set_volume(100)  # Set volume to 100%
                 self.music_player.play()
 
                 self.logger.info(f"Now playing: {video_title}")
-                return f"Playing: {video_title}. Click 'Interrupt' or 'Exit' to stop the music."
+                return f"Playing: {video_title}. Use 'Interrupt', 'Stop', or 'Exit' to control playback."
         except Exception as e:
             self.logger.error(f"Error during music playback: {e}")
             return f"An error occurred while playing the song: {e}"
@@ -125,26 +127,14 @@ class MusicModule:
         self.logger.info(f"Handling music request: {user_input}")
         # Handle stop-related commands
         if user_input.lower().strip() in ["interrupt", "stop", "exit", "quit"]:
-            self.stop_music()  # Stop the music playback
-
-            if user_input.lower().strip() == "interrupt":
-                self.logger.info("Music playback interrupted.")
-                return " "
-            elif user_input.lower().strip() == "exit":
-                self.logger.info("Exited from the current functionality.")
-                return "Exited from the current functionality."
-            elif user_input.lower().strip() == "quit":
-                self.logger.info("Music stopped. Redirecting to Groq API key page.")
-                return "Music stopped. Redirecting to Groq API key page."
+            self.stop_music()
+            return "Music stopped. Ready for the next command."
 
         # Refine the query for playing music
         refined_query = self.refine_music_query(user_input)
         if not refined_query:
             self.logger.warning("Refinement failed or no query extracted.")
             return "I couldn't understand the song you want to play. Could you try rephrasing?"
-
-        # Stop any currently playing music before starting a new one
-        self.stop_music()
 
         # Fetch and play the song
         return self.fetch_and_play_music(refined_query)
